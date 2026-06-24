@@ -1,596 +1,272 @@
-# EMS — SPRINT 1 — JIRA-READY STORIES (14)
-
-**Source:** EMS_Project v60 (Cowork-verified, grounded). **Sprint goal:** critical-path-led ramp.
-**Per-dev load:** Dev 1 = 8 pts · Dev 2 = 8 pts · Dev 3 = 8 pts (target 10; loaded ~8 for new-dev ramp).
-**Points = team-scale** (agile-Fibonacci). **3 stories carry ⚠ OPEN coordinator decisions — flagged at top of each.**
-
-How to use: each block = one Jira issue. Copy **Summary** into the issue title, set **Assignee / Points / Priority**,
-paste **Description** into the description field. The ⚠ OPEN blocks are decisions YOU resolve before that story is fully buildable.
-
-═══════════════════════════════════════════════════════════════════════════════
-## DEV 1 — RULE-ENGINE SPINE (8 pts) — owns the critical path
-═══════════════════════════════════════════════════════════════════════════════
-
-────────────────────────────────────────────────────────────────────
-SUMMARY:   L1-B04 — JSON validation on Rule save
-ASSIGNEE:  Dev 1   |   POINTS: 2   |   PRIORITY: P0 (Critical Path)   |   TYPE: Plugin/validation
-────────────────────────────────────────────────────────────────────
-DESCRIPTION:
-
-⚠⚠ OPEN — COORDINATOR DECISION REQUIRED BEFORE FULL BUILD ⚠⚠
-This story is at the FRONT of the critical path, but 2 of its 4 validation checks depend on the Rule
-Expression JSON schema (ADR-066 / L1-B05) which is NOT yet locked. Buildable now: (1) parseable JSON,
-(2) balanced AND/OR/NOT groups. BLOCKED until schema locks: (3) recognized operators, (4) valid
-attribute names. COORDINATOR PICKS: either (a) lock ADR-066 first so all 4 checks build this sprint,
-OR (b) ship the structural subset now and split operators/attributes to a follow-up.
-DO NOT INVENT an operator list or attribute catalog — a guessed schema propagates a wrong contract to B08.
-
-As a System Admin, I want the system to validate my rule's JSON syntax on save, so malformed rules
-don't reach Stage 5 evaluation.
-
-Dependencies (met): L1-B01 (Rule table) — Done. pei_rule has pei_conditionsjson (Multi-line text, 100k).
-
-Approach: synchronous PLUGIN on pei_rule Create + Update (Update filtered to pei_conditionsjson), pre-operation
-stage. A plugin gives control over JSON parsing and fail-vs-warn; a business rule can't parse JSON. Confirm
-plugin/assembly deployment is allowed in the tenant.
-
-BUILD BLOCKS:
-1. Confirm target: validate pei_conditionsjson (NOT pei_plainenglish — that's L1-B06's rendered output).
-2. Register synchronous steps on Create + Update (filtered), pre-operation. Async CANNOT block a save — must be sync.
-3. Structural checks (BUILD NOW): parseable JSON (deserialize; on fail throw InvalidPluginExecutionException with
-   position/message); balanced groups (walk tree; matched open/close + valid AND/OR/NOT). The thrown message is what
-   the admin sees — make it human ("Unbalanced group under the second OR clause"), not a stack trace.
-4. Operator + attribute checks (BLOCKED — see OPEN): recognized operators (unknown → hard-fail);
-   valid attribute names (unknown attribute → WARN, not fail — allow save + surface warning).
-
-ACCEPTANCE CRITERIA:
-- Validates Conditions JSON on Rule create/update.
-- Checks: parseable JSON, recognized operators, valid attribute names, balanced groups.
-- Invalid → save fails with descriptive error. Valid-but-unknown-attribute → save warns.
-
-DOD CHECKLIST:
-[ ] Validation on pei_rule Create AND Update.
-[ ] Valid rule saves cleanly.
-[ ] Malformed JSON → fails with descriptive message.
-[ ] Unknown operator → fails (GATED on ADR-066).
-[ ] Unbalanced group → fails.
-[ ] Unknown attribute → succeeds with warning (GATED on ADR-066).
-[ ] Sidecar L1-B04_Tenant_Test.md = PASS before Done.
-
-
-────────────────────────────────────────────────────────────────────
-SUMMARY:   L1-B03 — Hidden admin form for Rule authoring
-ASSIGNEE:  Dev 1   |   POINTS: 2   |   PRIORITY: P0 (Critical Path)   |   TYPE: MDA form
-────────────────────────────────────────────────────────────────────
-DESCRIPTION:
-
-RESUME NOTE: this form build was previously started and PARKED — pick up the existing in-progress form,
-do NOT create a second one. Check the maker portal for an existing "Rule Admin Form" on pei_rule first.
-
-As a System Admin, I want a dedicated form for authoring rules with a JSON editor, so I can write rule
-expressions in a controlled, admin-only environment.
-
-Dependencies (met): L1-B01 (Rule table) — Done.
-
-FORM — "Rule Admin Form" (main form on pei_rule), sections:
-- Identity:        pei_rulename, pei_description, pei_rulestatus
-- Logic:           pei_conditionsjson (JSON editor area), pei_plainenglish, pei_output
-- Scope/Priority:  pei_collectionscope, pei_priority, pei_terminating
-- Lifecycle:       pei_effectivefrom, pei_effectiveto, pei_currentversion
-Helper text on pei_conditionsjson: short JSON-schema description + link to L1-B05 schema doc (forward-link
-placeholder; B05 not yet built).
-
-BUILD BLOCKS:
-1. Create a SEPARATE main form "Rule Admin Form" (do not edit the default Information form — role scoping must differ).
-2. Add helper text on pei_conditionsjson (short; link to L1-B05, don't duplicate the schema).
-3. Add a sitemap subarea pointing at pei_rule via the Rule Admin Form (admin group).
-4. Scope visibility: form security roles → System Admin ONLY; REMOVE Risk Manager. A form with no role
-   restriction shows to everyone — restrict explicitly. Check the subarea's role filter too.
-
-ACCEPTANCE CRITERIA:
-- "Rule Admin Form" created with all fields incl. JSON Conditions area + helper text.
-- Hidden from Risk Manager; visible to System Admin only via sitemap subarea.
-
-DOD CHECKLIST:
-[ ] Form exists with all fields + JSON area + helper text.
-[ ] Sitemap subarea scoped to System Admin.
-[ ] As System Admin: form reachable, all fields shown.
-[ ] As Risk Manager: form does NOT appear.
-[ ] Helper text links to L1-B05 doc (forward-link noted).
-[ ] Sidecar L1-B03_Tenant_Test.md = PASS before Done.
-
+# EMS — A Guide to the System
 
-────────────────────────────────────────────────────────────────────
-SUMMARY:   L1-B10 — Rule version snapshot on edit
-ASSIGNEE:  Dev 1   |   POINTS: 2   |   PRIORITY: P0 (Critical Path)   |   TYPE: Plugin
-────────────────────────────────────────────────────────────────────
-DESCRIPTION:
-
-As a System Admin, I want every rule edit to create a Rule Version snapshot automatically, so historical
-rule states are preserved.
-
-Dependencies (met): L1-B02 (Rule Version table pei_ruleversion) — Done. L1-B01 (Rule table) — Done.
-
-Versioning semantics (confirm exact column set vs pei_ruleversion schema):
-- Snapshot fields: pei_conditionsjson, pei_output, pei_collectionscope, pei_priority, pei_terminating, rule name (min).
-- Effective dating: prior version Effective To = now; new version Effective From = now.
-- Version increment: pei_currentversion on pei_rule += 1.
-- Change reason: from a change-reason field if provided (confirm where).
-
-BUILD BLOCKS:
-1. Confirm snapshot target columns on pei_ruleversion. The snapshot is an EMBEDDED COPY (actual values), not just a lookup.
-2. Register plugin on pei_rule Update, pre-operation, WITH A PRE-IMAGE capturing snapshot fields. Without a pre-image
-   you can't see the OLD values during Update (Target only carries changes).
-3. Write the version row from the pre-image; stamp Effective To on the PRIOR row, Effective From on the new state; link to pei_rule.
-4. Increment pei_currentversion (+1); capture user + timestamp + change reason. Guard re-entrancy (depth check) — exactly
-   ONE version row per edit.
-
-ACCEPTANCE CRITERIA:
-- Plugin on Rule update captures pre-update state to a new Rule Version row.
-- Effective To on prior, Effective From on new; Current Version increments; user/timestamp/reason captured.
-
-DOD CHECKLIST:
-[ ] Plugin on pei_rule Update with pre-image.
-[ ] Editing a Rule creates EXACTLY ONE pei_ruleversion row.
-[ ] Effective dates stamped correctly (prior To / new From).
-[ ] pei_currentversion increments by 1.
-[ ] User, timestamp, change reason captured.
-[ ] No duplicate rows on a single edit.
-[ ] Sidecar L1-B10_Tenant_Test.md = PASS before Done.
-
-
-────────────────────────────────────────────────────────────────────
-SUMMARY:   L1-B15 — Create Cycle Rule Execution Log table
-ASSIGNEE:  Dev 1   |   POINTS: 1   |   PRIORITY: P0 (Critical Path)   |   TYPE: Schema
-────────────────────────────────────────────────────────────────────
-DESCRIPTION:
-
-NAMING CORRECTION (part of this story): the schema-doc placeholder "pei_cyclereexecutionlog" is a TYPO.
-The correct deployed name is "pei_cycleruleexecutionlog". Fix the placeholder and log the correction.
-
-As a System Admin, I want a Cycle Rule Execution Log table recording every rule firing during a cycle,
-so the platform has an immutable, queryable audit trail of which rule version evaluated which CP × App
-pair to which outcome. TABLE-CREATE ONLY — rows are written later by the L1-C05 flow (not this story).
-
-Dependencies (met): L1-B01, L1-B02 — Done. ADR-054 (cycle pinning) — locked.
-
-TABLE — pei_cycleruleexecutionlog (Display "Cycle Rule Execution Log"), User/Team owned, AUDIT ENABLED,
-READ-ONLY (no human create/write — rows only from the L1-C05 flow under System context).
-Verify schema name reads pei_cycleruleexecutionlog BEFORE first Save (locks at save).
-
-COLUMNS (ADR-054 cycle-pinning):
-1. Rule Version          pei_ruleversionid          Lookup → pei_ruleversion
-2. Rule Version JSON Snapshot  pei_ruleversionjsonsnapshot  Multi-line text  ← EMBEDDED immutable copy (the pinning column)
-3. Cycle                 pei_cycleid                Lookup → Import Cycle
-4. Control Procedure     pei_controlprocedureid     Lookup → Control Procedure
-5. Application           pei_applicationid          Lookup → Application
-6. Evaluation Result     pei_evaluationresult       Choice (Applicable / Not Applicable / Error)
-7. Error Message         pei_errormessage           Multi-line text
-8. Evaluated At          pei_evaluatedat            Date and Time
-9. Evaluator Version     pei_evaluatorversion       Single Line of Text
-Confirm Evaluation Result values vs the existing verdict convention (Applicable=890920000 / Not Applicable=890920001, Error next).
-
-BUILD BLOCKS:
-1. Create table + primary column; verify schema name (NOT the typo) before Save.
-2. Add the 5 lookups + 4 data columns. The JSON snapshot is plain multi-line text holding an embedded copy — NOT a lookup.
-3. Create Evaluation Result choice (values aligned to the verdict convention).
-4. Lock read-only by NOT granting create/write to human roles (confirm roles, not just form-level). Enable audit.
-5. Smoke-insert one row via system context; then fix the schema doc (full inventory + log the typo correction).
-
-ACCEPTANCE CRITERIA:
-- Table created (typo fixed); 9 columns per ADR-054; read-only at platform level; audit enabled; schema doc updated.
-
-DOD CHECKLIST:
-[ ] Table deployed with full column set + embedded JSON snapshot column.
-[ ] Read-only confirmed (no human create/edit); one sample row via system context.
-[ ] Audit enabled and verified.
-[ ] Schema doc updated; typo correction logged.
-[ ] No populated rows expected yet (L1-C05 is the only writer).
-[ ] Sidecar L1-B15_Tenant_Test.md = PASS before Done.
-
-
-────────────────────────────────────────────────────────────────────
-SUMMARY:   DOC-05 — ADR-029: Collection Scope as rule property
-ASSIGNEE:  Dev 1   |   POINTS: 1   |   PRIORITY: P2   |   TYPE: Documentation
-────────────────────────────────────────────────────────────────────
-DESCRIPTION:
-
-As an Architect, I want ADR-029 formally written, so the rationale for storing Collection Scope on rules
-(not Control Procedures) is preserved and the deprecation of Common/Hybrid/App-Level labels is documented.
-NO TENANT WORK — documentation deliverable.
-
-Dependencies: none (documents a settled April-25 decision).
-
-DOCUMENT — ADR-029_Collection_Scope_as_Rule_Property.md, canonical ADR sections:
-- Context:      pre-pivot CPs carried a scope label (Common/Application-Level/Hybrid); pivot makes applicability rule-driven.
-- Decision:     Collection Scope inherent to each rule (pei_rule.pei_collectionscope / KDD-002 D-04); labels removed from CP.
-- Consequences: Stage-5 output language changes — sample: "AC-2 produced 47 evidence collection points across 47 apps in
-                Finance BU." Deprecate pei_finalscopetype on CP (or repurpose as denormalized last-cycle field).
-- Alternatives: keeping scope on CP; hybrid model — why rule-level won.
-- Implementation Notes: where scope lives, how Stage 5 reads it, migration of the deprecated label.
-
-BUILD BLOCKS:
-1. Author the ADR (match the existing ADR template's section order/heading style for clean index import).
-2. Document the deprecation explicitly + the pei_finalscopetype decision.
-3. Reciprocate cross-references (rule schema doc, Stage-5 samples, superseded docs) + link from the ADR index.
-   Cross-refs must be reciprocal — a one-way link leaves the other doc unaware it's superseded.
-
-ACCEPTANCE CRITERIA:
-- ADR-029 authored with all 5 sections; deprecation documented; Stage-5 sample captured; affected fields listed;
-  cross-referenced reciprocally + linked from the ADR index.
-
-DOD CHECKLIST:
-[ ] ADR covers all 5 canonical sections.
-[ ] Deprecated labels documented as removed-from-CP with rule-inherent replacement.
-[ ] Stage-5 output-language sample captured.
-[ ] pei_finalscopetype decision recorded.
-[ ] Cross-refs reciprocated + linked from the ADR index.
-
-
-═══════════════════════════════════════════════════════════════════════════════
-## DEV 2 — INFRASTRUCTURE + L3 (8 pts)
-═══════════════════════════════════════════════════════════════════════════════
-
-────────────────────────────────────────────────────────────────────
-SUMMARY:   L1-Z02 — Service principal setup + flow migration
-ASSIGNEE:  Dev 2   |   POINTS: 3   |   PRIORITY: P0 (Critical Path)   |   TYPE: Infra/Flow
-────────────────────────────────────────────────────────────────────
-DESCRIPTION:
-
-⚠ EXTERNAL APPROVAL GATE (real-world, not code): Azure AD App Registration may require IT/security approval
-OUTSIDE the build team's authority. OPEN THE IT/SECURITY TICKET FIRST (Block 1) so provisioning isn't blocked at runtime.
-
-As a System Admin, I want all flows running under a dedicated service principal (not a personal account),
-so the system can deploy to production per policy and FSP integrity rules actually enforce against admins.
-KEYSTONE: several downstream stories (L1-G33–G38, L1-D10 re-resolve, L1-G03 create path) depend on this SP existing.
-
-Dependencies (met): L1-Z01 Decision 2 (SP required) — locked. Plus the external approval gate above.
-
-THE 7 PRODUCTION FLOWS (re-point each, re-test each): Flow 1 (Monthly Sync, 187 actions), Flow 2 (Gate Validation, 21),
-Flow 3A/3B/3C, Flow 3D (Evidence Generation, 18), Flow 4A (Confirmation, 43).
-
-BUILD BLOCKS:
-1. Open the approval channel FIRST (IT/security ticket / confirm authority) — the single most likely runtime blocker.
-2. Provision the SP (Azure AD → App Registrations → New). RECORD the Application (client) ID immediately.
-3. Assign a Power Platform license to the SP (per-flow or per-user — confirm tenant model; affects cost).
-4. Add the SP as a Dataverse application user with create/write on EMS tables. Grant EXACTLY the privileges the flows
-   exercise — over-granting weakens integrity, under-granting breaks flows. Cross-check what each flow writes.
-5. Migrate connections ONE FLOW AT A TIME (Flow 1 → 2 → 3A/3B/3C → 3D → 4A): Dataverse, SharePoint, Office 365, AI Builder.
-   A broken connection on 187-action Flow 1 is far easier to localize if you didn't change six others at once.
-6. Re-test each flow end-to-end. Highest risk: Flow 4A evidence path, Flow 1 Archer ingestion — verify correct rows under the SP.
-
-ACCEPTANCE CRITERIA:
-- SP provisioned; license assigned; SP in Dataverse role(s) with create/write on EMS tables; all 7 flows migrated to run as SP.
-
-DOD CHECKLIST:
-[ ] SP provisioned; client ID recorded.
-[ ] License assigned per agreed model.
-[ ] SP in Dataverse role(s) with create/write on EMS tables.
-[ ] All 7 flows re-pointed to SP; connections updated.
-[ ] Each flow re-tested end-to-end, no regressions (in sidecar).
-[ ] Sidecar L1-Z02_Tenant_Test.md = PASS before Done.
-
-
-────────────────────────────────────────────────────────────────────
-SUMMARY:   L3-A01 — Engagement table
-ASSIGNEE:  Dev 2   |   POINTS: 2   |   PRIORITY: P3   |   TYPE: Schema
-────────────────────────────────────────────────────────────────────
-DESCRIPTION:
-
-⚠⚠ OPEN — COORDINATOR DECISION REQUIRED BEFORE BUILD ⚠⚠
-Live AC lists fields ending in "etc." Schema names freeze at first save and L3 stories downstream (L3-A02/A03/A06)
-bind to these columns. CONFIRM BEFORE BUILDING:
-1. The FULL column list (resolve "etc." to an explicit set — do not guess).
-2. The "Scope" composite (BU/BP/framework/time window): separate columns or other model? CARDINALITY of each
-   (single BU vs many BUs — many-valued scope needs a junction table, not a lookup).
-3. Lookup targets (Engagement Type = Choice configured by L3-A02; Lead Auditor = System User — confirm).
-DO NOT invent columns to "finish" the table — a guessed scope model forces rework in L3-A03's scope-freeze.
-
-As a Risk Manager, I want an Engagement table to model audits/assessments, so evidence reviews can be scoped formally.
-
-Dependencies: none (Layer 3 entry table).
-
-TABLE — pei_engagement (Display "Engagement"), primary pei_engagementname (NOT pei_name — set before save),
-User/Team owned, AUDIT ENABLED.
-GROUNDED FIELDS (pending OPEN inventory): pei_engagementname (primary), pei_engagementtype (Choice, values from L3-A02),
-pei_status (Choice — transitions align with ADR-024 scope-freeze), pei_startdate, pei_enddate, pei_leadauditorid
-(Lookup → System User), Scope (see OPEN). ADR-024: Status values/transitions designed to support a clean active/locked state.
-
-BUILD BLOCKS (run only after OPEN confirmed):
-1. Create table + primary column pei_engagementname (verify, not pei_name) before Save.
-2. Add confirmed columns. Engagement Type as Choice (values by L3-A02). Lead Auditor as System User lookup.
-3. Generate default form/view/quick-create; smoke-test one Engagement.
-4. Enable audit; move Engagement into the live-tables section of the schema doc.
-
-ACCEPTANCE CRITERIA:
-- pei_engagement with Name, Engagement Type, Scope (BU/BP/framework/time window), Status, Start/End Date, Lead Auditor,
-  etc. (the "etc." is the OPEN item); form/view/list created.
-
-DOD CHECKLIST:
-[ ] OPEN resolved: full inventory + Scope shape + cardinality confirmed.
-[ ] pei_engagement deployed with confirmed fields, Status choice, Lead Auditor lookup; one sample record.
-[ ] Default form/view/quick-create smoke-tested.
-[ ] Audit enabled; edits in audit history.
-[ ] Schema doc updated.
-[ ] Sidecar L3-A01_Tenant_Test.md = PASS before Done.
-
-
-────────────────────────────────────────────────────────────────────
-SUMMARY:   INF-B01 — Failure notifications
-ASSIGNEE:  Dev 2   |   POINTS: 2   |   PRIORITY: P2   |   TYPE: Notification
-────────────────────────────────────────────────────────────────────
-DESCRIPTION:
-
-As a System Admin, I want alerts when flows fail, so I can intervene quickly.
-
-Dependencies: none (wraps existing flows).
-
-PRE-BUILD DECISIONS (confirm): major-flows set (Flow 1, 2, 3A/3B/3C/3D, 4A min); alert recipient(s) (admin DL);
-payload (flow name, error, run URL, timestamp, correlation ID); failure-log surface (Dataverse table OR SharePoint list
-— SharePoint at the EMS site is lighter).
-
-BUILD BLOCKS:
-1. Stand up the failure-log surface (queryable — email alone isn't auditable).
-2. Wrap each major flow with try-catch using the SCOPE pattern: a "Try" scope + a "Catch" scope with run-after =
-   "has failed"/"is skipped". This is Power Automate — build the catch via scope run-after config, not code-style try/catch.
-3. From each Catch, write a failure-log record with the full payload (use result()/expressions for the failed action's
-   error + run URL).
-4. Send the email alert from the catch path (error EXCERPT in body; full detail in the log record — keep it scannable).
-5. Induce a controlled failure in each flow to verify the record writes + email arrives. Set log retention to match the
-   audit-log target (cross-ref INF-B05).
-
-ACCEPTANCE CRITERIA:
-- All major flows wrapped; failures logged + email alert (flow name, error, run URL, timestamp).
-
-DOD CHECKLIST:
-[ ] Every flow wrapped at action boundaries; uncaught exceptions route to catch (not silent).
-[ ] Failure-log record on every catch; verified by induced failure per flow.
-[ ] Email fires with flow name, error excerpt, run URL, timestamp; verified in inbox.
-[ ] Log retention matches audit target (INF-B05).
-[ ] Sidecar INF-B01_Tenant_Test.md = PASS before Done.
-
-
-────────────────────────────────────────────────────────────────────
-SUMMARY:   INF-C01 — Archer feed retry logic
-ASSIGNEE:  Dev 2   |   POINTS: 1   |   PRIORITY: P2   |   TYPE: Flow resilience
-────────────────────────────────────────────────────────────────────
-DESCRIPTION:
-
-COORDINATION: the after-3-failures alert should land on the INF-B01 catch path (same Dev 2 work) — share ONE
-notification surface, don't build a second.
-
-As the System, I want Flow 1 to retry on transient Archer errors, so ingestion is resilient.
-
-Dependencies: none (hardens Flow 1, EMS Monthly Sync, 187 actions).
-
-PRE-BUILD DECISIONS (confirm): transient-error classes to retry (read timeout, file-not-found-yet, intermittent
-network — NOT a genuinely malformed file forever); backoff (3 retries, exponential); notification endpoint (INF-B01);
-delay-metadata target (run log).
-
-BUILD BLOCKS:
-1. Identify the Archer file-READ action in Flow 1 (target the read step, not downstream parsing).
-2. Configure retry with exponential backoff: action Settings → Retry Policy (exponential), and/or a Do-Until loop for
-   per-attempt delay logging. 3 retries, scoped to the catalogued transient classes.
-3. After retries exhausted, route to the INF-B01 catch path (file path, error context, run URL). REUSE INF-B01's surface.
-4. On successful retry, log attempt# + elapsed-ms per attempt. Confirm idempotency — a recovered retry must NOT
-   double-insert Staged rows.
-5. Verify: remove the Archer file mid-run (transient) → recovery; make it persistent → after-3 alert fires.
-
-ACCEPTANCE CRITERIA:
-- Retry 3× exponential on file-read failures; after 3 → notify admin; successful retry logs delay metadata.
-
-DOD CHECKLIST:
-[ ] Flow 1 retries Archer call 3× exponential on catalogued classes; verified by transient failure recovering.
-[ ] After 3rd failure admin notification fires (INF-B01 path); verified by persistent failure.
-[ ] Successful retry writes delay metadata to the run log.
-[ ] No duplicate Staged rows on success (idempotent).
-[ ] Sidecar INF-C01_Tenant_Test.md = PASS before Done.
-
-
-═══════════════════════════════════════════════════════════════════════════════
-## DEV 3 — IMPORT/CYCLE + EVIDENCE FOUNDATIONS (8 pts)
-═══════════════════════════════════════════════════════════════════════════════
-
-────────────────────────────────────────────────────────────────────
-SUMMARY:   L1-D01 — Update Import Cycle BPF to 6 stages
-ASSIGNEE:  Dev 3   |   POINTS: 2   |   PRIORITY: P1   |   TYPE: Business Process Flow
-────────────────────────────────────────────────────────────────────
-DESCRIPTION:
-
-SEQUENCING NOTE: gate fields are added in L1-D02; this story wires the BPF stages to those fields. Confirm the gate
-fields exist (or coordinate with D02) before binding. The stage→gate mapping is load-bearing (L1-D03–D08 replicate off it).
-
-As a Risk Manager, I want a 6-stage Business Process Flow on Import Cycle, so cycle progression matches the new architecture.
-MODIFIES the existing 5-stage BPF (L0-A05, Done) — expand to 6, do NOT build from scratch.
-
-Dependencies (met): modifies L0-A05 (Import Cycle, 5-stage BPF) — Done.
-
-THE 6 STAGES (in order): 1. Detect Changes → 2. Verify App BU → 3. Verify CP BU → 4. Confirm Rules → 5. Review Output → 6. Sign-off
-Each stage has ONE required gate field (Yes/No). Stage advances only when its gate = Yes.
-
-BUILD BLOCKS:
-1. Open the EXISTING "EMS Import Cycle" BPF (do NOT create a second — two active BPFs on one table fight to render).
-2. Expand 5 → 6 stages to match the order exactly. Confirm with coordinator how existing in-flight Import Cycle records
-   map onto the revised stages.
-3. Bind each stage to its gate field 1:1 (verify each gate's schema name). Gate fields come from L1-D02 — if D02 isn't
-   done they won't be selectable; coordinate.
-4. Enforce forward progression (required-step binding drives it; the gate-reversion LOCK itself is L1-G39, out of scope here).
-   Render the BPF on the Import Cycle form for Risk Manager. Verify a half-filled cycle can't jump ahead.
-
-ACCEPTANCE CRITERIA:
-- 6 stages in order; each has its required gate flag; stage advances only when gate = Yes; BPF visible on Import Cycle form.
-
-DOD CHECKLIST:
-[ ] BPF has the 6 stages IN ORDER.
-[ ] Each stage has one gate field bound.
-[ ] Forward progression verified; no skip possible.
-[ ] BPF visible/functional on the form for Risk Manager.
-[ ] Smoke-tested on a fresh Import Cycle record through all 6 stages.
-[ ] Sidecar L1-D01_Tenant_Test.md = PASS before Done.
-
-
-────────────────────────────────────────────────────────────────────
-SUMMARY:   L1-D10 — BU Mapping admin pages
-ASSIGNEE:  Dev 3   |   POINTS: 2   |   PRIORITY: P1   |   TYPE: MDA views
-────────────────────────────────────────────────────────────────────
-DESCRIPTION:
-
-COORDINATION: the "Re-resolve BU" action invokes a flow as the SERVICE PRINCIPAL (provisioned by L1-Z02, Dev 2,
-this sprint) — coordinate so the flow's SP connection is in place.
-
-As a System Admin, I want dedicated pages for managing BU and BU mappings, so I can maintain the resolution data.
-
-Dependencies (met): L1-A02 (BU Org Unit Mapping) — Done. L1-A03 (BP-to-BU Mapping) — Done.
-
-FOUR SUB-PAGES: 1. Business Units (CRUD) · 2. Org Unit Mappings (L1-A02 CRUD) · 3. BP Mappings (L1-A03 CRUD) ·
-4. Unresolved Items (filtered view of records that failed to resolve).
-
-BUILD BLOCKS:
-1. Add a "BU Configuration" sitemap area (admin surface).
-2. Add four sub-pages, each pointing at its table with a list view + usable main form. Unresolved Items = filtered view
-   of records lacking a resolved BU (confirm the filter selects the unresolved set).
-3. Wire the "Re-resolve BU" action: it must INVOKE A FLOW RUNNING AS THE SERVICE PRINCIPAL — no direct UI write
-   (master records are strict-immutable, L1-Z01 Decision 4). Coordinate with L1-Z02 for the SP connection.
-4. Scope the "BU Configuration" subarea to System Admin only (ADR-032). Unrestricted subareas show to everyone.
-
-ACCEPTANCE CRITERIA:
-- "BU Configuration" subarea (System Admin); 4 sub-pages each with list+form CRUD; "Re-resolve BU" action linked.
-
-DOD CHECKLIST:
-[ ] "BU Configuration" visible ONLY to System Admin.
-[ ] Four sub-pages with list view + form CRUD.
-[ ] "Re-resolve BU" verified to invoke the resolution flow AS SERVICE PRINCIPAL (not a direct write).
-[ ] As a non-admin: "BU Configuration" does not appear.
-[ ] Sidecar L1-D10_Tenant_Test.md = PASS before Done.
-
-
-────────────────────────────────────────────────────────────────────
-SUMMARY:   L2-D01 — Evidence reuse data model
-ASSIGNEE:  Dev 3   |   POINTS: 2   |   PRIORITY: P3   |   TYPE: Schema
-────────────────────────────────────────────────────────────────────
-DESCRIPTION:
-
-⚠⚠ OPEN — COORDINATOR DECISION REQUIRED BEFORE BUILD ⚠⚠
-Intent is grounded (ADR-025 snapshot-matching; additive junction; reuse flag), but 3 schema decisions are undecided
-(names freeze at save). CONFIRM BEFORE CREATING THE TABLE:
-1. Junction table NAME (e.g. pei_evidenceapplicability / pei_evidencereuselink — confirm canonical).
-2. Exact COLUMN INVENTORY: the two FK lookups (Evidence, Applicability), the originating-evidence reference
-   (source of the snapshot match), and any match-trail metadata (matched-on, matched-at).
-3. CARDINALITY: a junction implies M:N — confirm intended cardinality + uniqueness (one row per Evidence×Applicability),
-   plus the reuse-flag definition (Yes/No or derived count) and that it is flow-written (L2-D03/ADR-034), never human-written.
-DO NOT invent the table name or columns — a guessed shape forces rework in L2-D03 and breaks the snapshot-match audit trail.
-
-As an Auditor, I want to know when one piece of evidence satisfies multiple controls, so the same artifact isn't requested twice.
-Reuse is detected by SNAPSHOT MATCHING (ADR-025) — NOT file hash or filename.
-
-Dependencies: none (anchored on ADR-025 — locked).
-
-BUILD BLOCKS (run only after OPEN confirmed):
-1. Create the junction table with the confirmed name (verify schema name before Save).
-2. Add the FK pair (→ pei_evidence, → Applicability) + originating-evidence reference (makes reuse auditable) + match-trail metadata.
-3. Add the reuse flag on pei_evidence per confirmed type. FLOW-WRITTEN only (L2-D03/ADR-034) — confirm no form exposes it editable.
-4. Verify backward compat: a pre-existing Evidence still resolves to its Applicability via the original 1:1 lookup WITHOUT a
-   junction row (additive — no migration, no field deletion).
-
-ACCEPTANCE CRITERIA:
-- Junction linking Evidence to multiple Applicabilities; backward-compatible 1:1 preserved; reuse flag on Evidence.
-
-DOD CHECKLIST:
-[ ] OPEN resolved: name, column inventory, cardinality (+ reuse-flag type/write path) confirmed.
-[ ] Junction deployed with FK pair + originating-evidence reference.
-[ ] Existing 1:1 preserved (no deletion/migration); pre-junction record still resolves without a junction row.
-[ ] Reuse flag on pei_evidence, flow-written only (no human-edit path); verified.
-[ ] Sidecar L2-D01_Tenant_Test.md = PASS before Done.
-
-
-────────────────────────────────────────────────────────────────────
-SUMMARY:   L1-G02 — Evidence cannot be manually deleted
-ASSIGNEE:  Dev 3   |   POINTS: 1   |   PRIORITY: P1   |   TYPE: Field security / FSP
-────────────────────────────────────────────────────────────────────
-DESCRIPTION:
-
-As an Auditor, I want Evidence records protected from deletion, so ADR-025 immutability is enforced.
-
-Dependencies: none (ADR-025 — evidence never deleted — locked).
-
-BUILD BLOCKS:
-1. Confirm target: remove Delete on pei_evidence for ALL roles (incl. BULK delete — bulk uses the same privilege; verify the bulk path).
-2. Set Delete = None on every role (incl. System Admin — ADR-025 means NO human role keeps Delete; watch inherited/derived roles).
-3. Verify a delete attempt fails — single AND bulk, at the form AND API/Advanced-Find paths (test the API path: a hidden
-   form button doesn't mean the API blocks it).
-
-ACCEPTANCE CRITERIA:
-- FSP blocks Delete on pei_evidence for all roles; bulk delete blocked; tested by attempting delete (fails).
-
-DOD CHECKLIST:
-[ ] Delete removed for all roles; bulk also blocked.
-[ ] Delete attempt (single AND bulk) fails at form AND API paths.
-[ ] ADR-025 immutability enforced at the delete boundary.
-[ ] Sidecar L1-G02_Tenant_Test.md = PASS before Done.
-
-
-────────────────────────────────────────────────────────────────────
-SUMMARY:   L1-G03 — Evidence cannot be manually created
-ASSIGNEE:  Dev 3   |   POINTS: 1   |   PRIORITY: P1   |   TYPE: Flow / FSP
-────────────────────────────────────────────────────────────────────
-DESCRIPTION:
-
-⚠ COORDINATION GATE — READ BEFORE BUILDING:
-Full DoD needs a SERVICE-PRINCIPAL flow create to SUCCEED while human creates are blocked. That succeeding leg depends on:
-- L1-Z02 (SP provisioned) — THIS SPRINT, Dev 2. Coordinate so the SP exists before verifying the create-succeeds leg.
-- L1-G18 (SP FSP bypass) — NOT STARTED, NOT in Sprint 1. L1-G18 is what lets the SP retain Create despite this block.
-RISK: a blanket Create-block without the SP bypass can block FLOW-PRODUCED evidence too (Flow 3D/4A), breaking ingestion.
-TWO SAFE PATHS — confirm with coordinator: (1) build this FSP to EXPLICITLY EXEMPT the SP's application-user role in the
-same step (fold the L1-G18 bypass for the create privilege), OR (2) sequence L1-G18 alongside this story.
-DO NOT deploy a blanket Create-block that also catches the service principal.
-
-As a System Admin, I want Evidence records only creatable via flows, so evidence has proper rule provenance.
-
-Dependencies: none formal (ADR-025 + L1-Z01 Decision 5 — locked) + the coordination gate above.
-
-BUILD BLOCKS:
-1. Confirm target + the SP exemption: block Create on pei_evidence for all non-System roles; identify WHICH application-user/
-   role is the SP that must retain Create (from L1-Z02). Target the exemption precisely — nothing broader.
-2. Set Create = None for every human role; ensure the SP application user RETAINS Create (via the exemption / L1-G18 bypass).
-3. Verify: human create blocked (each non-System role, form AND API) AND a service-principal flow create SUCCEEDS. If the
-   SP-create leg can't yet be verified (L1-G18 not in place), record human-blocked as verified, SP-succeeds as PENDING —
-   do NOT mark Done until both legs pass.
-
-ACCEPTANCE CRITERIA:
-- FSP blocks Create on pei_evidence for all roles except the SP; SP retains Create via L1-G18 bypass; verified both legs.
-
-DOD CHECKLIST:
-[ ] Create removed for all non-System (human) roles.
-[ ] SP retains Create (exemption / L1-G18 bypass) — coordinate per gate.
-[ ] Human create blocked at form AND API in each non-System role.
-[ ] SP flow create SUCCEEDS (gated on L1-Z02 + L1-G18; if G18 not in place, leg pending, story NOT Done).
-[ ] No human-originated Evidence.
-[ ] Sidecar L1-G03_Tenant_Test.md = PASS (both legs) before Done.
-
-═══════════════════════════════════════════════════════════════════════════════
-## SPRINT-1 SUMMARY TABLE
-═══════════════════════════════════════════════════════════════════════════════
-
-| Story  | Dev   | Pts | Priority | Type        | Flag |
-|--------|-------|-----|----------|-------------|------|
-| L1-B04 | Dev 1 | 2   | P0 Crit  | Plugin      | ⚠ OPEN (ADR-066) |
-| L1-B03 | Dev 1 | 2   | P0 Crit  | MDA form    | resume parked |
-| L1-B10 | Dev 1 | 2   | P0 Crit  | Plugin      | — |
-| L1-B15 | Dev 1 | 1   | P0 Crit  | Schema      | typo fix incl. |
-| DOC-05 | Dev 1 | 1   | P2       | Doc         | — |
-| L1-Z02 | Dev 2 | 3   | P0 Crit  | Infra/Flow  | ⚠ ext approval |
-| L3-A01 | Dev 2 | 2   | P3       | Schema      | ⚠ OPEN (columns) |
-| INF-B01| Dev 2 | 2   | P2       | Notification| — |
-| INF-C01| Dev 2 | 1   | P2       | Resilience  | shares INF-B01 |
-| L1-D01 | Dev 3 | 2   | P1       | BPF         | coord L1-D02 |
-| L1-D10 | Dev 3 | 2   | P1       | MDA views   | coord L1-Z02 |
-| L2-D01 | Dev 3 | 2   | P3       | Schema      | ⚠ OPEN (schema) |
-| L1-G02 | Dev 3 | 1   | P1       | FSP         | — |
-| L1-G03 | Dev 3 | 1   | P1       | FSP         | ⚠ coord L1-Z02+G18 |
-
-TOTALS: Dev 1 = 8 · Dev 2 = 8 · Dev 3 = 8 · Sprint = 24 pts / 14 stories
-
-THE 3 OPEN COORDINATOR DECISIONS (resolve these — they block full build of those 3 stories):
-1. L1-B04 — lock ADR-066 (operator set + attribute catalog), OR approve shipping the structural subset now.
-2. L3-A01 — confirm the full Engagement column inventory + the Scope composite shape & cardinality.
-3. L2-D01 — confirm the junction table name + exact columns + cardinality + reuse-flag type/write-path.
+### Everything a new team member needs to understand EMS, in plain language
+
+*Written in the voice of Horos, the team's business analyst. No codes, no shorthand, no internal references — just what EMS is, why it exists, how it works, and how its most important pieces actually behave. It reads in about half an hour.*
+
+**What's in this guide.** **Part One** is the full story — what EMS is and how it works, end to end. **Part Two** is a closer look at the three things people always want to see next: how a rule is written, what the monthly screen feels like to use, and how an audit is set up. **Part Three** is the complete map of everything EMS does, so the whole team shares one picture of the system.
+
+---
+
+# Part One — The Full Story
+
+## The one-sentence version
+
+EMS is the system that keeps a large organization **permanently ready to prove it follows its own rules** — by automatically working out which rules apply to which pieces of software, gathering the proof, and keeping that proof current and audit-ready, all the time, in the background.
+
+If you remember nothing else: **EMS is a standing readiness system for compliance.** Not a once-a-year scramble. A quiet machine that keeps the house in order every single month, so that whenever someone comes to inspect, the answer is already there.
+
+## Why it exists — the problem in human terms
+
+Picture a big company. It runs hundreds of different software applications — for payroll, for email, for customer records, for finance, for everything. Separately, it has a long list of **information-security controls**: the security rules it must obey. Some come from law, some from regulators, some from its own security policy. "Customer data must be encrypted." "Privileged access must require multi-factor authentication." "User access must be reviewed every quarter." There are hundreds of these too.
+
+Now the hard part. Every rule does not apply to every application. A rule about securing a data centre's doors doesn't apply to a cloud service nobody can walk into. A customer-data-encryption rule applies to the systems that store sensitive information, but not to a public marketing page. So somebody has to answer, over and over: *which rules actually apply to which applications, and what proof do we need to show we're following them?*
+
+If you do that by hand, the numbers are brutal. Hundreds of applications multiplied by hundreds of rules is **tens of thousands of possible combinations** — and only a fraction of them are real and relevant. The old way left one overworked person (call them the risk manager) to look at that entire field every period, decide what was in scope, chase dozens of busy colleagues for evidence, nag the ones who hadn't replied, and then assemble it all into a tidy package whenever an audit loomed. It was slow, it was error-prone, and it had to be redone again and again because the software list and the rules both kept changing.
+
+**EMS takes that manual, repetitive, error-prone job and turns it into something steady, consistent, and mostly automatic.**
+
+## What EMS actually is
+
+EMS sits in the **middle** of two things the company already has:
+
+- **The list of rules** — the official catalogue of every control the organization must follow. (Another system owns this list; the company keeps it in a tool called Archer.)
+- **The list of software** — the master inventory of every application the company runs, with details like who owns it, how critical it is, and how it's hosted. (Another system owns this too; the company keeps it in a tool called LeanIX.)
+
+EMS does **not** own either list. It never changes them. It simply **reads from both** and lives at the point where they meet. Its whole job is to answer the question those two lists imply but neither one answers on its own: *given these rules and this software, what must we prove, have we proved it, and is the proof still good?*
+
+Think of EMS as a meticulous **records office** standing between the rule-makers and the software owners — keeping a live, trustworthy ledger of who owes what proof, what's been provided, what's been approved, and what's about to go stale.
+
+It's built as a business application on the company's standard low-code platform, so it looks and feels like the other internal tools people already use — forms, lists, dashboards, and an inbox of tasks.
+
+## The big idea that makes it work: rules instead of hand-sorting
+
+Here is the cleverest part, and the thing most worth understanding.
+
+The old way was to look at every rule-and-application combination, one at a time, every period, and decide by hand whether it applied. Unworkable at scale.
+
+EMS works differently. The organization writes a set of **plain-English rules once**, describing *when* a control applies — something like: "This control applies to any application that stores sensitive customer data." The system then applies those rules **consistently and automatically** to every application, every period, and produces the list of what's in scope — without a person re-sorting the whole field each time.
+
+Two things make this trustworthy rather than mysterious:
+
+**The rules are written as readable statements, not buried in program code.** This matters enormously for audits. An auditor can be shown, in plain language, the exact rule that decided "this control applies to that application." Nobody has to take a programmer's word for it. The decision is legible.
+
+**Every decision is frozen and kept.** Each time the system runs, it takes a snapshot of the rules it used and the answers it produced, and stores that snapshot permanently. So a year later you can still see exactly which rule, in exactly which form, decided exactly what — even if the rules have since changed.
+
+This is the heart of EMS. Everything else serves it. (Part Two shows exactly how one of these rules is written.)
+
+## The steady rhythm: the monthly heartbeat
+
+EMS runs on a regular cycle — typically once a month. Each cycle walks through a handful of clear steps, and a human approves each step before it moves on. In plain terms, a cycle goes like this:
+
+First, **notice what changed.** The system pulls in the latest version of the rules list and the software list, and works out what's new, what's been updated, and what's been removed since last time. It even writes a short summary so a person can see at a glance what moved.
+
+Then, **sort out ownership** — make sure each affected application and each affected rule is correctly attached to the right part of the business, flagging anything it can't place so a human can resolve it.
+
+Then the **risk manager reviews the rules in plain English** and confirms they're right for this period. Then they **review the results** the system produced — the list of what now applies and what proof is therefore required — and look over anything unusual.
+
+Finally, there's a deliberate **sign-off**: a small ceremony that closes the cycle, locks in the results, and sends out the notifications telling people what they owe.
+
+The striking number here: in steady state, this takes the risk manager somewhere around **fifteen to twenty minutes a month** — down from what used to be hours of grinding work. The system does the heavy sorting; the human does the judging and approving. (Part Two walks through exactly what that monthly screen looks like to use.)
+
+One firm principle runs through every cycle: **once a step is approved, it can't be quietly un-approved.** If something turns out to be wrong, you don't secretly rewrite history — you either cancel the cycle and start fresh, or you correct it openly in the next period. That discipline is what makes the whole record trustworthy.
+
+## The life of a single piece of proof
+
+When the cycle decides a control applies to an application, it creates a request for **evidence** — the proof that the control is actually being followed. Each piece of evidence then travels a one-way path, and it's worth knowing that path because it's the day-to-day texture of the system:
+
+It begins as a **gap** — we know we need this proof, but nobody has provided it yet. When the responsible person uploads a document, it becomes **pending** — provided, but not yet checked. The risk manager reviews it and either **approves** it, at which point it becomes the official record, or sends it back as still missing, with a reason. Over time, proof gets stale, so every piece has an expiry; when that date passes, it's marked **expired** and needs refreshing. And if a control stops applying, its evidence is quietly marked **no longer required** — but never thrown away.
+
+A few details make this trustworthy rather than just tidy:
+
+**People don't stamp the records — the system does.** A person clicks "approve" or "upload," but the actual marking of the official status is done by the system itself, behind the scenes. That sounds like a technicality; it's actually the backbone of trust. It means every status on every record can be traced to an automatic, consistent action rather than someone typing directly into the ledger.
+
+**Nothing is ever deleted, and the past never changes.** The actual documents live in a secure shared library; the records office keeps the details, a link to the file, and — crucially — a **frozen photograph** of what the rule and the application looked like at the moment the proof was approved. Even if everything changes later, you can always see exactly what was true at the time. History is preserved, not overwritten.
+
+**The system spots proof you already have.** A built-in assistant notices when a document already on file would satisfy a new request, and offers it up for the risk manager to accept — so the same evidence isn't chased twice. It only steps in when there's a genuine candidate, to keep it sensible and low-cost.
+
+## The two rhythms, and why they're kept apart
+
+There are really two tempos in EMS, and a lot of the design is about keeping them from interfering with each other.
+
+The **quiet, continuous one** is everything above: the monthly heartbeat that keeps evidence flowing and current, forever, without anyone having to actively manage it.
+
+The **occasional, intense one** is an **audit** — or a regulatory review, or an assessment. These are events, with deadlines and findings. When one begins, it draws on the evidence the quiet rhythm has been steadily gathering.
+
+The key rule between them: **the audit consumes the proof; it never drives the gathering.** An audit looks at what's already there and shows where the gaps are. And the moment an audit begins, it takes its own **frozen snapshot** of what's in scope. After that, anything that changes in the wider system flows into future months — never sideways into the audit already under way. The ground never shifts under the auditor's feet, which is exactly the nightmare a good audit needs to avoid. When the audit finishes, it produces a summary and records its findings — but it only ever **observes** the evidence; it never edits it. (Part Two shows exactly how an audit is set up.)
+
+## The people in the story
+
+EMS is shaped around real roles, and each one sees a different slice of it:
+
+- **The risk manager** is the central character — the person who runs the monthly cycle, checks the rules, approves or rejects evidence, and signs off. Each one looks after a particular part of the business.
+- **The control owner** is the colleague responsible for a specific control. They're the one who receives the request and uploads the proof.
+- **The control tester** validates that a control is genuinely operating — the hands-on check behind the evidence, distinct from the owner who supplies it.
+- **Administrators** are the small handful of people who set up and maintain the rules and the underlying configuration.
+- **Auditors** are brought in for a specific review and can see only the records that belong to their review — nothing else.
+- **Reviewers and leadership** get read-only views: some browse the catalogue, others watch the high-level dashboards and summaries.
+- **The system itself** is the quiet participant — the automated hand that does the actual record-keeping, so that no human has to be trusted to write the official status directly.
+
+## Why it's worth it — what "good" looks like
+
+When EMS is doing its job, the organization is **always ready** instead of perpetually scrambling. Audit preparation stops being a fire drill and becomes a matter of opening a view. The risk manager's monthly burden shrinks from hours to minutes. The decisions about what applies are **consistent and explainable** — the same rules applied the same way every time, and readable by anyone who asks. The trail is **complete and tamper-resistant**, because nothing is deleted and every status change is automatic and attributable. And effort isn't wasted re-collecting proof the company already holds.
+
+In short: less manual grind, fewer mistakes, and a calm, defensible answer ready at any moment for the question "can you prove it?"
+
+## The edges — what EMS deliberately does *not* do
+
+Knowing a system's boundaries is the fastest way to understand it, so here they are plainly:
+
+It **does not own the rules or the software list.** It reads both from elsewhere and never writes back to them. It is the meeting point, not the source.
+
+It **does not decide policy.** It faithfully applies rules that people have written; it doesn't invent what the organization should require.
+
+It **does not let anyone quietly rewrite the past.** Approvals can't be secretly undone; corrections happen openly, going forward, as fresh records.
+
+It **does not let an audit change the evidence.** Audits look; they never edit.
+
+And it **does not finalize anything important without a human.** The system does the sorting and the record-keeping, but a person reviews and approves at every meaningful gate. The machine proposes; the human disposes.
+
+## Going further: gathering the proof automatically
+
+For much of the evidence, EMS doesn't wait for a person to fetch and upload it — it **gathers the proof directly from the systems that already produce it.** A great deal of security proof isn't really a document someone has to go and make; it already exists, as a record, inside another system the company already runs. EMS connects to each of these and reads the proof continuously:
+
+- **GitHub**, the code system — whether code changes were reviewed and approved before they shipped, what the branch-protection rules are, and who signed off on each deployment;
+- **ServiceNow**, the IT service-desk system — the change records, the incident fixes, and the access requests;
+- **Qualys**, the vulnerability scanner — the vulnerability and configuration-scan findings for each system;
+- **SailPoint IdentityIQ**, the identity-governance system — who has access to what, whether that access was certified, the role assignments, and the segregation-of-duties checks;
+- and the **applications themselves**, through their own interfaces — configuration snapshots, audit logs, and transaction samples.
+
+EMS reads that proof straight from those systems instead of asking a person to fetch and upload it each time. (Some, like GitHub and ServiceNow, plug in directly; others, like Qualys and IdentityIQ, whose data is larger and more involved, are brought in through a small helper layer first — but to the people using EMS, it all simply arrives.) People's role becomes that of the **exception-handlers** — stepping in where automation can't reach, and reviewing what the system gathered for them. That's the full strength of "always ready": a system that doesn't just **organize** the evidence people provide, but **continuously collects** the evidence itself.
+
+**That's the whole picture.** Once you can see those edges, everything you'll hear in your first meetings has a place to sit. Three questions usually come next — and they're worth answering properly, because they're where the system's character really shows.
+
+---
+
+# Part Two — A Closer Look
+
+## 1. How exactly is an applicability rule written?
+
+Remember the big idea: instead of a person deciding, for every control and every application, whether the control applies — the organization writes a set of **rules once**, and the system applies them consistently. So what is a rule, really?
+
+**A rule is a short, readable sentence in three parts:** a *condition*, a *verdict*, and a *reach*.
+
+- The **condition** describes what an application looks like, using facts the system already knows about it — the kind of thing the application inventory records. Is it internet-facing? Does it store sensitive customer data? Is it business-critical? Does it use single sign-on? Does it require penetration testing? There are about fifteen of these known facts, and a condition is just a combination of them.
+- The **verdict** is the simple outcome: *this control applies* (or *does not apply*).
+- The **reach** says how widely the evidence is needed: once **centrally** for the whole organization, or once **per application** — and, when it's per application, whether that's every application or only those owned by the part of the business that owns the control.
+
+Put together, a rule reads almost like plain English. For example:
+
+> *"When an application stores sensitive customer data **and** is reachable from outside the company network, the quarterly access-review control applies to it — and we need that evidence once for each such application."*
+
+That single sentence is a rule. The condition is "stores sensitive customer data and is internet-facing," the verdict is "the access-review control applies," and the reach is "once per application."
+
+**Two more dials make rules work together cleanly.** Real compliance isn't one rule — it's many, and they can overlap. So each rule also has:
+
+- An **order**. Rules are checked in a set sequence, lowest number first. This lets you write a broad rule and then a narrower one that refines it.
+- A **"final" switch**. You can mark a rule so that once it decides, no later rule can override it for that application. This is how a specific exception can stop a broad rule cleanly — *"this control applies to everything… except, finally, for retired applications, it doesn't."*
+
+That combination — order plus a "final" switch — is deliberately simple. It keeps the rules readable and predictable instead of turning into a tangle of nested "if this and that but not the other" logic that nobody could audit.
+
+**Three things make rules trustworthy, not mysterious:**
+
+- **Every rule is shown in plain English.** Whoever reviews the rules each month reads them as sentences, not as code. An auditor can be handed the exact rule that decided "this control applies to that application" and read it for themselves.
+- **The system keeps a frozen copy of every rule it used.** When a rule decides something, the system saves the exact wording of the rule at that moment. So even if the rule is reworded next year, you can always see precisely what was true when the decision was made.
+- **Rules are versioned, never quietly changed.** A rule is first written as a draft, then switched on. Editing a switched-on rule saves a new version and keeps the old one. Rules are retired by switching them off — never deleted. The history is always there.
+
+**What happens when a fact is missing?** Applications sometimes have blanks — the inventory doesn't always know whether an app is internet-facing, say. The system is deliberately careful here: rather than guess, a rule that depends on a missing fact is **flagged as an error for that application** and set aside, so a person notices the data gap instead of the system silently making the wrong call.
+
+## 2. What does the risk manager's monthly screen look like?
+
+Once a month, the risk manager does the single most important recurring job in EMS — and they do almost all of it from **one screen**. Here's what using it feels like, start to finish.
+
+**You open it, and the first thing you see is a plain-language summary of what changed.** The system has already pulled in the latest version of the controls list and the application inventory, worked out what's new, what changed, and what's gone, and written you a short briefing — in sentences, not spreadsheets. *"This month: four new applications, two retired controls, one application moved to a new part of the business."* You're never staring at raw data wondering what moved.
+
+**Then the screen walks you through six checkpoints, in order.** This is the heart of the design: you don't get the whole thing at once, you move through it one approved step at a time. Each checkpoint shows the relevant items in a list right below it, and each ends with an approval you click before the next opens:
+
+1. **Acknowledge what changed.** You read the summary and confirm you've seen it.
+2. **Confirm who owns the changed applications.** For any application that moved or arrived, the system has worked out which part of the business owns it; you confirm, and anything it couldn't place is flagged for you to sort out.
+3. **Confirm who owns the changed controls.** The same check, for controls.
+4. **Review the rules.** You read the active rules — in plain English — and confirm they're right for this period. (You're reading here, not editing; rule changes happen separately.)
+5. **Review the results.** This is the substance: the system has applied the rules and produced the list of what now applies and what evidence is therefore needed. You look it over, pay attention to anything unusual, and confirm.
+6. **Sign off.** A deliberate final step — a small ceremony — that closes the month, makes everything live, and sends out the evidence requests to the people who owe them.
+
+**Most months, this takes about fifteen to twenty minutes.** The system does the heavy sorting; you're doing the judging and approving. The two longer steps are reviewing the rules and reviewing the results; the rest are quick confirmations.
+
+**A few things about how the screen behaves are worth knowing:**
+
+- **It won't let you skip ahead.** You approve each checkpoint before the next becomes available — the order is the discipline.
+- **Approvals can't be quietly undone.** Once you've confirmed a step, it stays confirmed. If something's genuinely wrong, you don't secretly reverse it — you cancel the whole month's cycle and start a clean one. That's deliberate: it's what keeps the record trustworthy.
+- **You're not the one who stamps the records.** You click "confirm," but the system itself writes the official statuses behind the scenes. It feels seamless, and it means every change is traceable to an automatic, consistent action rather than a person typing directly into the ledger.
+- **If nothing changed at all**, the screen recognizes that and can quietly close the month for you — no busywork.
+
+## 3. How does an audit get set up and scoped?
+
+This is the moment everything else exists to serve. An **audit** — or a regulatory review, or an assessment; these are all kinds of the same thing — is how an outside or internal reviewer comes to check that the organization is following its controls. Here's how one is set up, in plain terms.
+
+**Someone starts the audit by saying what it covers.** That's the setup: you define the scope — *which* controls are in, *which* applications, *which* part of the business, and *for what time period*. An audit of access-control evidence across the customer-facing systems for the last quarter is a different scope from a security review of a single newly-onboarded application. The audit is shaped by that definition.
+
+**The instant the audit is activated, its scope freezes.** This is the most important idea in the whole audit side. From that moment, anything that changes in the wider system — a new application, a reworded control, a fresh piece of evidence — flows into *future* months only. It never reaches sideways into the audit already under way. The reviewer is looking at a stable, fixed picture; the ground never shifts under their feet mid-review. (Without this, you'd get the nightmare every auditor dreads: the data moving while they're auditing it.)
+
+**The audit then simply reads the evidence that's already there.** It does not go and collect anything — remember, gathering happens continuously in the background, all the time. The audit consumes what's already on file. It pulls together every relevant piece of evidence, organized so the reviewer can see coverage at a glance, and — just as importantly — it highlights the **gaps**: applicable controls with no evidence yet, evidence that has expired, applications with incomplete coverage. The whole point is to make "are we covered?" answerable in a moment instead of a scramble.
+
+**The audit only ever looks — it never changes the evidence.** It can record its own findings on itself, and flag follow-up actions, but it cannot alter, approve, or delete the underlying proof. The evidence is the organization's record; the audit observes it.
+
+**Only the right people can see it.** Each audit has its own assigned members, and a reviewer assigned to one audit sees only that audit's contents — not everything in the system. So an external auditor brought in for one review is walled into exactly what they're meant to see.
+
+**When it's done, the audit produces a summary** — a packaged view of what was in scope, what was covered, and what the findings were — and closes.
+
+---
+
+# Part Three — Everything EMS Does
+
+This is the complete map of EMS's capabilities — one picture of the whole system, grouped by the part of the work each one serves.
+
+### The monthly engine
+
+- **Automatic monthly synchronization.** Every month, EMS pulls the latest controls and applications from the two source systems and detects what's new, what changed, what was removed, and what came back.
+- **Change triage.** It works out which changes actually affect evidence (and so need a human's review) versus cosmetic ones (updated quietly), so the risk manager is never flooded with noise.
+- **The monthly change summary.** A built-in assistant writes a short, plain-language briefing of what moved this month, and flags anything unusual.
+- **Ownership resolution.** It automatically works out which part of the business owns each application, control, and business process — and flags anything it can't place for a person to decide.
+- **The rule engine.** Writing, switching on, versioning, and applying the rules that decide which controls apply to which applications — the heart of the whole system (Part Two walks through how a rule is written).
+- **The guided monthly cycle and its safeguards.** The six-checkpoint monthly review, with its no-skip ordering, its can't-be-undone approvals, and the built-in gate-keeper that blocks a checkpoint that isn't genuinely complete.
+- **The risk manager's monthly screen.** The single screen where the whole monthly review happens, checkpoint by checkpoint (Part Two walks through it).
+
+### Evidence, end to end
+
+- **Evidence collection.** Control owners receive their assigned requests and upload the proof.
+- **The approval workflow.** The full life of a piece of proof — needed, provided, approved, expired, renewed — with the system stamping each step.
+- **Automatic evidence reuse.** The assistant proposes reusing proof already on file when it fits a new request, for the risk manager to accept or reject — so the same document isn't chased twice.
+- **Evidence freshness tracking.** Watching evidence age, expiry dates, staleness, and overdue requests, and raising alerts *before* anything lapses.
+
+### The people-facing surfaces
+
+- **The control owner portal.** A separate, simplified app so a control owner sees only their own tasks and uploads — without the full system.
+- **The compliance dashboard.** Read-only views of how complete coverage is — sliced by control, by application, by business unit — and what's still unmapped.
+- **The catalogue browser.** A searchable browse of every control, procedure, application, and business process.
+- **Administration.** The settings surfaces — the rules catalogue (where rules are authored), synchronization settings, evidence types, and workflow configuration.
+
+### Audits and engagements
+
+- **Engagement management — audits and reviews.** Setting up and running audits, reviews, and assessments that consume the evidence with their scope frozen (Part Two walks through it), across the six recognized kinds: **SOX quarterly checks, regulator inquiries, internal control reviews, vendor-risk assessments, incident reviews, and external audits.** All six share the same shape; they differ in their scope rules and the kinds of findings they record.
+
+### The connected system
+
+- **Automatic evidence gathering.** EMS connects directly to the systems that already produce the proof — **GitHub** (code reviews, branch policies, deployment approvals), **ServiceNow** (change records, incident remediation, access requests), **Qualys** (vulnerability and configuration scans), **SailPoint IdentityIQ** (access certifications, role assignments, segregation-of-duties checks), and the **in-scope applications' own interfaces** (configuration snapshots, audit logs, transaction samples) — and reads the evidence continuously, so people shift from uploading evidence to handling the exceptions.
+- **Requests delivered in your team's own tools.** Evidence requests arrive in the work-tracking system a team already uses, not only by email.
+- **Between-cycle changes.** Occasional reclassifications that can't wait for the next monthly cycle are handled as they arise.
+
+### The guarantees underneath
+
+- **Automatic, attributable record-keeping.** Every official status is written by the system, not typed by a person, so every change traces to a consistent, automatic action.
+- **Permanent, never-deleted evidence.** Nothing is ever thrown away; evidence that no longer applies is marked, not removed.
+- **Frozen point-in-time snapshots.** Every decision keeps a photograph of the rule and the application as they were at the moment it was made.
+- **A one-way, no-rewrite history.** Approvals can't be silently reversed; corrections happen openly, going forward. The trail is complete and tamper-resistant by design.
+
+---
+
+## Where to go from here
+
+You now have both the whole picture and a close look at its three most telling pieces. If you want to go further still, the same plain-language approach can open up any of the deeper pieces — how the system decides which part of the business owns a control, how the built-in assistant proposes reusing evidence, or how the whole thing is assembled on the company's standard low-code platform. Ask, and the right part of the team can walk you through it.
+
+And the one image to carry with you: **EMS draws a clear line around an organization's compliance — which rules apply, to what, with what proof, and is that proof still good — answered continuously, automatically, and in a way anyone can read and trust.** It turns a vague, recurring anxiety ("are we covered?") into a plain, visible, always-current answer.
